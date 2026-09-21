@@ -420,7 +420,26 @@ describe('CI workflow', () => {
       }
     }
     if (!isRecord(node24Consumers.env)) throw new TypeError('Consumer job must define environment')
-    expect(node24Consumers.env.DSH_SNAPSHOT_MAX_CONCURRENCY).toContain('!github.event.repository.fork')
+    const consumerResources = {
+      DSH_GATE_CONCURRENCY: ['2', '10'],
+      DSH_OXLINT_THREADS: ['2', '8'],
+      DSH_PUBLINT_CONCURRENCY: ['2', '8'],
+      DSH_WEB_SNAPSHOT_WORKERS: ['2', '6'],
+      DSH_SNAPSHOT_MAX_CONCURRENCY: ['2', '32'],
+    } as const
+    for (const [name, [forkValue, enterpriseValue]] of Object.entries(consumerResources)) {
+      const expression = node24Consumers.env[name]
+      const evaluateResource = (fork: boolean, mode = 'blacksmith'): unknown => evaluateRunsOn(expression, {
+        vars: { DSH_CI_FAILOVER_LINUX: mode },
+        github: { event: { repository: { fork }, pull_request: { user: { login: 'maintainer' } } } },
+      })
+      expect(evaluateResource(true), `${name} must fit a standard fork runner`).toBe(forkValue)
+      expect(evaluateResource(false), `${name} must preserve the enterprise default`).toBe(enterpriseValue)
+    }
+    expect(evaluateRunsOn(node24Consumers.env.DSH_SNAPSHOT_MAX_CONCURRENCY, {
+      vars: { DSH_CI_FAILOVER_LINUX: 'selfhosted' },
+      github: { event: { repository: { fork: false }, pull_request: { user: { login: 'maintainer' } } } },
+    })).toBe('12')
     const consumerSteps = (node24Consumers.steps as unknown[]).filter(isRecord)
     expect(consumerSteps.find(step => step.name === 'Use HTTPS for Ubuntu archives on Blacksmith')?.if)
       .toContain('!github.event.repository.fork')
@@ -1165,6 +1184,10 @@ describe('Issue lifecycle workflow', () => {
     for (const step of steps.slice(1)) {
       expect(step.if, `${String(step.name)} must stay behind lifecycle preflight`).toBe("${{ steps.preflight.outputs.eligible == 'true' }}")
     }
+    const policyDocs = readFileSync(resolve(root, '.github/issue-management/README.md'), 'utf8')
+    const policyDocsZh = readFileSync(resolve(root, '.github/issue-management/README.zh.md'), 'utf8')
+    expect(policyDocs).toContain('Their green Issue policy result is an explicit exemption, not evidence of enforcement')
+    expect(policyDocsZh).toContain('绿色的 Issue policy 结果表示明确豁免，并不证明策略已强制执行')
 
     // issue-policy owns PR validation; it is read-only and a real gate.
     const policyPullRequest = workflowEvent(policy, 'pull_request')

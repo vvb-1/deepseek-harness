@@ -249,17 +249,20 @@ jobs:
           || 'dsh-ubuntu-24-04-16core' }}
     name: node 24 / snapshots and artifacts
     env:
-      DSH_GATE_CONCURRENCY: '10'
+      # Repository forks run this lane on a 4-vCPU GitHub-hosted runner rather
+      # than the upstream 16-core fleet, so cap every parallel consumer there.
+      DSH_GATE_CONCURRENCY: ${{ github.event.repository.fork && '2' || '10' }}
       DSH_NODE_COMPAT_SKIP_TYPECHECK: '1'
-      DSH_OXLINT_THREADS: '8'
-      DSH_PUBLINT_CONCURRENCY: '8'
-      DSH_WEB_SNAPSHOT_WORKERS: '6'
+      DSH_OXLINT_THREADS: ${{ github.event.repository.fork && '2' || '8' }}
+      DSH_PUBLINT_CONCURRENCY: ${{ github.event.repository.fork && '2' || '8' }}
+      DSH_WEB_SNAPSHOT_WORKERS: ${{ github.event.repository.fork && '2' || '6' }}
       # A failing gate aborts its running siblings: a failing build stops the
       # independent Node compatibility smoke, and a failing reader (e.g.
       # publint) stops the remaining artifact consumers.
       DSH_GATE_FAIL_FAST: '1'
-      # Failover halves snapshot concurrency for the shared 64-core VM.
-      DSH_SNAPSHOT_MAX_CONCURRENCY: ${{ !github.event.repository.fork && vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '12' || '32' }}
+      # Failover halves snapshot concurrency for the shared 64-core VM; forks
+      # use the hosted-runner cap above instead of either upstream setting.
+      DSH_SNAPSHOT_MAX_CONCURRENCY: ${{ github.event.repository.fork && '2' || vars.DSH_CI_FAILOVER_LINUX == 'selfhosted' && github.event.pull_request.user.login != 'dependabot[bot]' && '12' || '32' }}
     steps:
       # Runner cleanup owns tool caches and fixtures, including cancelled runs.
       - name: Use runner-owned temporary storage
