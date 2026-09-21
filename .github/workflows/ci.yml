@@ -118,11 +118,12 @@ jobs:
           || 'dsh-ubuntu-24-04-16core' }}
     name: node 24 / coverage
     env:
-      # Partitioning replaces the instrumented share; this budget gives the
-      # exempt-heavy gate two workers on both hosted and failover runners.
-      DSH_COVERAGE_MAX_WORKERS: '6'
-      DSH_COVERAGE_PARTITIONS: '4'
-      DSH_GATE_CONCURRENCY: '3'
+      # Repository forks use a standard 4-vCPU hosted runner. Keep their two
+      # instrumented partitions serial with the exempt-heavy gate; upstream
+      # retains the enterprise runner's existing 4-partition/6-worker budget.
+      DSH_COVERAGE_MAX_WORKERS: ${{ github.event.repository.fork && '2' || '6' }}
+      DSH_COVERAGE_PARTITIONS: ${{ github.event.repository.fork && '2' || '4' }}
+      DSH_GATE_CONCURRENCY: ${{ github.event.repository.fork && '1' || '3' }}
       # Managed-scope teardown cases run past the default per-test budget when
       # this lane's partitions, workers, and sibling gates share one host: the
       # disposal cases in subprocess-local and bash-sandbox exceeded 5000ms on
@@ -562,10 +563,12 @@ jobs:
     name: windows node 24 / coverage
     timeout-minutes: 120
     env:
-      DSH_COVERAGE_MAX_WORKERS: '6'
-      DSH_COVERAGE_PARTITIONS: '4'
+      # Match the Linux fork cap: hosted Windows has four vCPUs, while the
+      # upstream runner keeps its existing parallel coverage budget.
+      DSH_COVERAGE_MAX_WORKERS: ${{ github.event.repository.fork && '2' || '6' }}
+      DSH_COVERAGE_PARTITIONS: ${{ github.event.repository.fork && '2' || '4' }}
       DSH_COVERAGE_TEST_TIMEOUT_MS: '90000'
-      DSH_GATE_CONCURRENCY: '3'
+      DSH_GATE_CONCURRENCY: ${{ github.event.repository.fork && '1' || '3' }}
       # A gate failure aborts the sibling gate instead of waiting out its
       # multi-minute instrumented run.
       DSH_GATE_FAIL_FAST: '1'

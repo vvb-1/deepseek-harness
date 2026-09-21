@@ -246,9 +246,9 @@ describe('CI workflow', () => {
       expect(install!.run).not.toContain('$cloneFlag')
     }
 
-    // windows-coverage uses the lower 4-partition profile.
+    // windows-coverage owns the platform coverage command; its fork and
+    // enterprise resource profiles are evaluated below.
     expect(windowsCoverage.name).toBe('windows node 24 / coverage')
-    expect(windowsCoverage.env).toMatchObject({ DSH_COVERAGE_PARTITIONS: '4' })
     const coverageSteps = windowsCoverage.steps as unknown[]
     const coverageCommands = coverageSteps.filter((step): step is Record<string, unknown> & { run: string } => (
       isRecord(step) && typeof step.run === 'string'
@@ -440,6 +440,22 @@ describe('CI workflow', () => {
       vars: { DSH_CI_FAILOVER_LINUX: 'selfhosted' },
       github: { event: { repository: { fork: false }, pull_request: { user: { login: 'maintainer' } } } },
     })).toBe('12')
+    for (const [jobName, job] of [['node-24-coverage', node24Coverage], ['windows-coverage', windowsCoverage]] as const) {
+      if (!isRecord(job.env)) throw new TypeError(`${jobName} must define environment`)
+      const coverageResources = {
+        DSH_COVERAGE_MAX_WORKERS: ['2', '6'],
+        DSH_COVERAGE_PARTITIONS: ['2', '4'],
+        DSH_GATE_CONCURRENCY: ['1', '3'],
+      } as const
+      for (const [name, [forkValue, enterpriseValue]] of Object.entries(coverageResources)) {
+        const expression = job.env[name]
+        const evaluateResource = (fork: boolean): unknown => evaluateRunsOn(expression, {
+          github: { event: { repository: { fork } } },
+        })
+        expect(evaluateResource(true), `${jobName} ${name} must fit a standard fork runner`).toBe(forkValue)
+        expect(evaluateResource(false), `${jobName} ${name} must preserve the enterprise default`).toBe(enterpriseValue)
+      }
+    }
     const consumerSteps = (node24Consumers.steps as unknown[]).filter(isRecord)
     expect(consumerSteps.find(step => step.name === 'Use HTTPS for Ubuntu archives on Blacksmith')?.if)
       .toContain('!github.event.repository.fork')
