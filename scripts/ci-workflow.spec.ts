@@ -409,6 +409,15 @@ describe('CI workflow', () => {
         .toBe('ubuntu-latest')
     }
 
+    if (!isRecord(node24.env)) throw new TypeError('Static job must define environment')
+    const staticGateConcurrency = node24.env.DSH_GATE_CONCURRENCY
+    expect(staticGateConcurrency).toContain('github.event.repository.fork')
+    const evaluateStaticGateConcurrency = (fork: boolean): unknown => evaluateRunsOn(staticGateConcurrency, {
+      github: { event: { repository: { fork } } },
+    })
+    expect(evaluateStaticGateConcurrency(true), 'static gates must fit a standard fork runner').toBe('2')
+    expect(evaluateStaticGateConcurrency(false), 'static gates must preserve the enterprise default').toBe('8')
+
     // Every hosted fork path must also select hosted setup, cache, and browser
     // steps even if the fork copied an upstream failover variable.
     for (const job of [node24, node24Coverage, node24Consumers]) {

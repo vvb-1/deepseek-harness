@@ -50,7 +50,10 @@ jobs:
           || 'dsh-ubuntu-24-04-16core' }}
     name: node 24 / static
     env:
-      DSH_GATE_CONCURRENCY: '8'
+      # Repository forks use a standard 4-vCPU hosted runner. Keep their
+      # aggregate below the doc gates' own four-worker cap; upstream retains
+      # the enterprise runner's existing eight-gate budget.
+      DSH_GATE_CONCURRENCY: ${{ github.event.repository.fork && '2' || '8' }}
       # Stop the aggregate at the first blocking gate failure so a red run
       # does not keep burning enterprise runner time on the remaining gates.
       DSH_GATE_FAIL_FAST: '1'
