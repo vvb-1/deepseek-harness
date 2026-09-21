@@ -54,6 +54,8 @@ PR 打开时，工作流按配置时区中的 PR 创建日期，为每个被引�
 
 [config.json](config.json)选择仓库、Project、字段名、状态、生命周期操作者和时区。策略读取 Project 自定义单选 `Priority` 字段，而非组织原生 Issue Priority 字段。维护者手动设置 Project Priority；指引编辑原生 Issue 字段的 skill 不会填充该值。Issue 审计先移除 PR 专用 kind 标签和已停用的标签别名，再校验其余元数据。不提供字段迁移或 Priority 同步。
 
+仓库本身为 fork 时，不运行 PR 校验或生命周期 Project 修改，因为 fork 不会继承上游 Project App 安装或凭据。此时绿色的 Issue policy 结果表示明确豁免，并不证明策略已强制执行；Project 校验与生命周期更新仍由上游仓库负责。
+
 生命周期处理由事件驱动，不是协调器。被省略的事件不会修复 Project 状态，并发 Project mutation 也没有原子比较并交换保护。选择性求值不重新设计必需检查的权威来源，也不保证已测得的 Actions 分钟节省。[选择性求值决策](../../.agents/notes/implemented/process/2026-09-07-selective-issue-policy-evaluation.zh.md)记录取舍。
 
 -----

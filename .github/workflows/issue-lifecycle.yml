@@ -38,13 +38,29 @@ jobs:
       (github.event_name != 'pull_request' || github.event.action != 'edited' || github.event.changes.body != null)
     runs-on: ubuntu-latest
     steps:
+      - name: Determine lifecycle eligibility
+        id: preflight
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
+          const fork = event.repository?.fork === true
+          const eligible = !fork
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `eligible=${eligible}\n`)
+          console.log(eligible
+            ? 'Lifecycle policy is eligible.'
+            : 'Fork repository lifecycle is exempt; no App credentials are requested.')
+          NODE
       - name: Check out trusted policy
+        if: ${{ steps.preflight.outputs.eligible == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - name: Create project token
         id: app-token
+        if: ${{ steps.preflight.outputs.eligible == 'true' }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
           client-id: ${{ vars.DSH_ISSUE_APP_CLIENT_ID }}
@@ -52,6 +68,7 @@ jobs:
           owner: deepseek-harness
           repositories: deepseek-harness
       - name: Handle repository event
+        if: ${{ steps.preflight.outputs.eligible == 'true' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: node .github/issue-management/policy.mjs lifecycle
