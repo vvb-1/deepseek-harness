@@ -27,7 +27,17 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          if [ -f .github/issue-management/selective-preflight.json ]; then
+          fork_repository=$(node --input-type=module <<'NODE'
+          import fs from 'node:fs'
+          const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
+          process.stdout.write(String(event.repository?.fork === true))
+          NODE
+          )
+          if [ "$fork_repository" = true ]; then
+            echo 'legacy-automated=true' >> "$GITHUB_OUTPUT"
+            echo 'needs-project=false' >> "$GITHUB_OUTPUT"
+            echo 'Fork policy integration is exempt; no upstream repository or Project API is queried.'
+          elif [ -f .github/issue-management/selective-preflight.json ]; then
             node .github/issue-management/policy.mjs pr-preflight
           else
             node --input-type=module <<'NODE'

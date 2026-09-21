@@ -186,6 +186,8 @@ describe('CI workflow', () => {
       expect(typeof job['runs-on']).toBe('string')
       expect(job['runs-on'], `${jobName} runs-on must use the Windows failover switch`).toContain('DSH_CI_FAILOVER_WINDOWS')
       expect(job['runs-on'], `${jobName} runs-on must not use the Linux failover switch`).not.toContain('DSH_CI_FAILOVER_LINUX')
+      expect(job['runs-on'], `${jobName} must use a GitHub-hosted runner in a fork`).toContain('github.event.repository.fork')
+      expect(job['runs-on']).toContain('windows-2025')
       expect(job['runs-on']).toContain('self-hosted')
       expect(job['runs-on']).toContain('dsh-win-ci')
       expect(job['runs-on']).toContain('dsh-windows-2025-16core')
@@ -328,9 +330,12 @@ describe('CI workflow', () => {
       expect(typeof job['runs-on']).toBe('string')
       expect(job['runs-on'], `${jobName} runs-on must use the Linux failover switch`).toContain('DSH_CI_FAILOVER_LINUX')
       expect(job['runs-on'], `${jobName} runs-on must not use the Windows failover switch`).not.toContain('DSH_CI_FAILOVER_WINDOWS')
+      expect(job['runs-on'], `${jobName} must use a GitHub-hosted runner in a fork`).toContain('github.event.repository.fork')
+      expect(job['runs-on']).toContain('ubuntu-24.04')
       expect(job['runs-on']).toContain('vm-backup')
       expect(job['runs-on']).toContain('blacksmith-16vcpu-ubuntu-2404')
     }
+    expect(aggregate['runs-on']).toContain('github.event.repository.fork')
     expect(aggregate['runs-on']).toContain('DSH_CI_FAILOVER_LINUX')
     expect(aggregate['runs-on']).not.toContain('DSH_CI_FAILOVER_WINDOWS')
     expect(aggregate['runs-on']).toContain('vm-backup')
@@ -342,19 +347,36 @@ describe('CI workflow', () => {
     const selectors = {
       linux: node24['runs-on'] as string,
       linuxAggregate: aggregate['runs-on'] as string,
+      linuxCompat: nodeCompat['runs-on'] as string,
       windows: windowsBuild['runs-on'] as string,
     }
-    const evaluate = (expression: string, vars: Record<string, string>, login = 'maintainer'): unknown => {
+    const evaluate = (
+      expression: string,
+      vars: Record<string, string>,
+      login = 'maintainer',
+      fork = false,
+    ): unknown => {
+      const repository = fork ? 'vvb-1/deepseek-harness' : 'deepseek-harness/deepseek-harness'
       return evaluateRunsOn(expression, {
         vars,
         fromJSON: JSON.parse,
-        github: { event: { pull_request: { user: { login } } } },
+        matrix: { runner: 'ubuntu-latest' },
+        github: {
+          repository,
+          event: {
+            repository: { fork },
+            pull_request: {
+              head: { repo: { fork: false, full_name: repository } },
+              user: { login },
+            },
+          },
+        },
       })
     }
-    for (const [name, selector, variable, pool, hosted] of [
-      ['linux gates', selectors.linux, 'DSH_CI_FAILOVER_LINUX', ['self-hosted', 'linux', 'x64', 'vm-backup'], 'dsh-ubuntu-24-04-16core'],
-      ['linux aggregate', selectors.linuxAggregate, 'DSH_CI_FAILOVER_LINUX', ['self-hosted', 'linux', 'x64', 'vm-backup'], 'ubuntu-latest'],
-      ['windows lanes', selectors.windows, 'DSH_CI_FAILOVER_WINDOWS', ['self-hosted', 'dsh-win-ci', 'windows'], 'dsh-windows-2025-16core'],
+    for (const [name, selector, variable, pool, hosted, forkHosted] of [
+      ['linux gates', selectors.linux, 'DSH_CI_FAILOVER_LINUX', ['self-hosted', 'linux', 'x64', 'vm-backup'], 'dsh-ubuntu-24-04-16core', 'ubuntu-24.04'],
+      ['linux aggregate', selectors.linuxAggregate, 'DSH_CI_FAILOVER_LINUX', ['self-hosted', 'linux', 'x64', 'vm-backup'], 'ubuntu-latest', 'ubuntu-latest'],
+      ['windows lanes', selectors.windows, 'DSH_CI_FAILOVER_WINDOWS', ['self-hosted', 'dsh-win-ci', 'windows'], 'dsh-windows-2025-16core', 'windows-2025'],
     ] as const) {
       expect(evaluate(selector, { [variable]: 'blacksmith' }), `${name} blacksmith value`).toMatch(/^blacksmith-/)
       expect(evaluate(selector, { [variable]: 'selfhosted' }), `${name} selfhosted value`).toEqual(pool)
@@ -364,7 +386,34 @@ describe('CI workflow', () => {
       for (const mode of ['', 'hosted', 'unexpected']) {
         expect(evaluate(selector, { [variable]: mode }), `${name} default on ${mode}`).toBe(hosted)
       }
+      for (const mode of ['', 'blacksmith', 'selfhosted', 'unexpected']) {
+        expect(evaluate(selector, { [variable]: mode }, 'dependabot[bot]', true), `${name} fork on ${mode}`).toBe(forkHosted)
+      }
     }
+    for (const mode of ['', 'blacksmith', 'selfhosted', 'unexpected']) {
+      expect(evaluate(selectors.linuxCompat, { DSH_CI_FAILOVER_LINUX: mode }, 'maintainer', true))
+        .toBe('ubuntu-latest')
+    }
+
+    // Every hosted fork path must also select hosted setup, cache, and browser
+    // steps even if the fork copied an upstream failover variable.
+    for (const job of [node24, node24Coverage, node24Consumers]) {
+      if (!Array.isArray(job.steps)) throw new TypeError('Linux CI job must define steps')
+      for (const step of job.steps.filter(isRecord)) {
+        if (step.uses === 'actions/cache/restore@v4') {
+          expect(step.if).toContain('github.event.repository.fork')
+        }
+      }
+    }
+    if (!isRecord(node24Consumers.env)) throw new TypeError('Consumer job must define environment')
+    expect(node24Consumers.env.DSH_SNAPSHOT_MAX_CONCURRENCY).toContain('!github.event.repository.fork')
+    const consumerSteps = (node24Consumers.steps as unknown[]).filter(isRecord)
+    expect(consumerSteps.find(step => step.name === 'Use HTTPS for Ubuntu archives on Blacksmith')?.if)
+      .toContain('!github.event.repository.fork')
+    expect(consumerSteps.find(step => step.name === 'Install Playwright Chromium and hosted dependencies')?.if)
+      .toContain('github.event.repository.fork')
+    expect(consumerSteps.find(step => step.name === 'Install Playwright Chromium on the failover VM')?.if)
+      .toContain('!github.event.repository.fork')
 
     // The run-gates aggregate lanes stop at the first blocking gate failure so
     // a red aggregate does not keep burning runner time on the remaining
@@ -896,6 +945,33 @@ describe('Python release workflows', () => {
   })
 })
 
+describe('Build preview workflow', () => {
+  it('builds untrusted pull requests without deploying, verifying, or commenting', () => {
+    const workflow = loadWorkflow('.github/workflows/build-preview-cloudflare.yml')
+    const preview = workflowJob(workflow, 'preview')
+    if (!Array.isArray(preview.steps)) throw new TypeError('Preview job must define steps')
+    const steps = preview.steps.filter(isRecord)
+
+    for (const name of [
+      'Upload to Cloudflare Pages',
+      'Verify the protected deployment serves the image',
+      'Comment the preview URL',
+    ]) {
+      const step = steps.find(candidate => candidate.name === name)
+      expect(step, `${name} must exist`).toBeDefined()
+      expect(step?.if, `${name} must require a repository-owned non-Dependabot PR`).toContain(
+        'github.event.pull_request.head.repo.full_name == github.repository',
+      )
+      expect(step?.if).toContain("github.event.pull_request.user.login != 'dependabot[bot]'")
+    }
+
+    for (const name of ['Build workspace', 'Build the preview page and pack the VFS image']) {
+      expect(steps.find(candidate => candidate.name === name)?.if).toBeUndefined()
+    }
+    expect(JSON.stringify(workflow.on)).not.toContain('pull_request_target')
+  })
+})
+
 describe('Weighted approval workflow', () => {
   it('publishes from the trusted default branch after pull request and review updates', () => {
     const publisher = loadWorkflow('.github/workflows/weighted-approval.yml')
@@ -1023,10 +1099,20 @@ describe('Issue lifecycle workflow', () => {
     expect(issueEvents.types).toContain('typed')
     expect(issueEvents.types).toContain('untyped')
     const steps = lifecycleJob.steps.filter(isRecord)
+    const preflightStep = steps.find(s => s.id === 'preflight')
     const tokenStep = steps.find(s => s.name === 'Create project token')
     const handleStep = steps.find(s => s.name === 'Handle repository event')
-    expect(tokenStep?.if).toBeUndefined()
-    expect(handleStep?.if).toBeUndefined()
+    expect(preflightStep?.run).toContain('GITHUB_EVENT_PATH')
+    expect(preflightStep?.run).toContain('event.repository?.fork === true')
+    expect(preflightStep?.run).toContain("['Bot', 'App'].includes(event.pull_request?.user?.type)")
+    expect(tokenStep).toMatchObject({
+      if: "${{ steps.preflight.outputs.eligible == 'true' }}",
+      with: {
+        owner: 'deepseek-harness',
+        repositories: 'deepseek-harness',
+      },
+    })
+    expect(handleStep?.if).toBe("${{ steps.preflight.outputs.eligible == 'true' }}")
 
     // issue-policy owns PR validation; it is read-only and a real gate.
     const policyPullRequest = workflowEvent(policy, 'pull_request')
@@ -1044,6 +1130,8 @@ describe('Issue lifecycle workflow', () => {
     expect(preflightStep).toMatchObject({ shell: 'bash' })
     expect(preflightStep?.run).toContain('if [ -f .github/issue-management/selective-preflight.json ]; then')
     expect(preflightStep?.run).toContain('node .github/issue-management/policy.mjs pr-preflight')
+    expect(preflightStep?.run).toContain('event.repository?.fork === true')
+    expect(preflightStep?.run).toContain('legacy-automated=true')
     expect(preflightStep?.if).toBeUndefined()
     expect(policyJob.if).toBeUndefined()
     expect(validateStep?.if).toBe("${{ steps.preflight.outputs.legacy-automated != 'true' }}")
