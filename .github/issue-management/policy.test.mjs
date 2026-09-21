@@ -911,7 +911,7 @@ test('keeps trusted preflight before token minting and required policy unconditi
   assert.ok(steps[2].includes('permission-organization-projects: read'))
   assert.ok(steps[3].includes('PROJECT_TOKEN: ${{ steps.app-token.outputs.token }}'))
   assert.ok(steps[3].includes('run: node .github/issue-management/policy.mjs pr'))
-  assert.ok(steps[3].includes("if: ${{ steps.preflight.outputs.legacy-automated != 'true' }}"))
+  assert.ok(steps[3].includes("if: ${{ steps.preflight.outputs.fork-exempt != 'true' && steps.preflight.outputs.legacy-automated != 'true' }}"))
 })
 
 test('runs trusted rollout selection with absent and present capability markers', { skip: process.platform === 'win32' ? 'The policy workflow executes under hosted Ubuntu bash' : false }, (t) => {
@@ -927,6 +927,7 @@ test('runs trusted rollout selection with absent and present capability markers'
     { name: 'legacy bot', type: 'Bot', marker: false, expected: 'legacy-automated=true\nneeds-project=false\n' },
     { name: 'legacy app', type: 'App', marker: false, expected: 'legacy-automated=true\nneeds-project=false\n' },
     { name: 'modern exempt', type: 'Bot', marker: true, expected: 'exempt=true\nneeds-project=false\n' },
+    { name: 'fork repository', type: 'User', marker: true, fork: true, expected: 'fork-exempt=true\nneeds-project=false\n' },
     { name: 'modern failure', type: 'User', marker: true, failure: true, expected: '' },
   ]
   for (const [index, fixture] of cases.entries()) {
@@ -935,7 +936,7 @@ test('runs trusted rollout selection with absent and present capability markers'
     mkdirSync(policyDirectory, { recursive: true })
     const eventPath = join(cwd, 'event.json')
     const outputPath = join(cwd, 'output')
-    writeFileSync(eventPath, JSON.stringify({ pull_request: { user: { type: fixture.type }, draft: fixture.draft } }))
+    writeFileSync(eventPath, JSON.stringify({ repository: { fork: fixture.fork === true }, pull_request: { user: { type: fixture.type }, draft: fixture.draft } }))
     writeFileSync(outputPath, '')
     if (fixture.marker) writeFileSync(join(policyDirectory, 'selective-preflight.json'), '{"version":1}\n')
     writeFileSync(join(policyDirectory, 'policy.mjs'), fixture.marker && !fixture.failure

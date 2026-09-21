@@ -1206,10 +1206,10 @@ describe('Issue lifecycle workflow', () => {
     expect(preflightStep?.run).toContain('if [ -f .github/issue-management/selective-preflight.json ]; then')
     expect(preflightStep?.run).toContain('node .github/issue-management/policy.mjs pr-preflight')
     expect(preflightStep?.run).toContain('event.repository?.fork === true')
-    expect(preflightStep?.run).toContain('legacy-automated=true')
+    expect(preflightStep?.run).toContain('fork-exempt=true')
     expect(preflightStep?.if).toBeUndefined()
     expect(policyJob.if).toBeUndefined()
-    expect(validateStep?.if).toBe("${{ steps.preflight.outputs.legacy-automated != 'true' }}")
+    expect(validateStep?.if).toBe("${{ steps.preflight.outputs.fork-exempt != 'true' && steps.preflight.outputs.legacy-automated != 'true' }}")
 
     expect(tokenStep).toMatchObject({
       id: 'app-token',

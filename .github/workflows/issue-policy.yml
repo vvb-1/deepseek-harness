@@ -34,7 +34,7 @@ jobs:
           NODE
           )
           if [ "$fork_repository" = true ]; then
-            echo 'legacy-automated=true' >> "$GITHUB_OUTPUT"
+            echo 'fork-exempt=true' >> "$GITHUB_OUTPUT"
             echo 'needs-project=false' >> "$GITHUB_OUTPUT"
             echo 'Fork policy integration is exempt; no upstream repository or Project API is queried.'
           elif [ -f .github/issue-management/selective-preflight.json ]; then
@@ -61,7 +61,7 @@ jobs:
           permission-organization-projects: read
       # Re-read current state even after an exempt preflight; never replace a failure with an edit skip.
       - name: Validate pull request
-        if: ${{ steps.preflight.outputs.legacy-automated != 'true' }}
+        if: ${{ steps.preflight.outputs.fork-exempt != 'true' && steps.preflight.outputs.legacy-automated != 'true' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PROJECT_TOKEN: ${{ steps.app-token.outputs.token }}
