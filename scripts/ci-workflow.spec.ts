@@ -681,8 +681,19 @@ describe('Runtime and LLM e2e Blacksmith routing', () => {
         for (const release of [false, true]) {
           for (const mode of ['', 'selfhosted', 'unexpected', 'blacksmith']) {
             const vars = { DSH_CI_FAILOVER_LINUX: 'blacksmith', DSH_CI_FAILOVER_WINDOWS: 'blacksmith', [variable]: mode }
-            expect(evaluateRunsOn(build['runs-on'], { inputs: { ci, release }, vars, matrix: { target, runner } }), `${target} ci=${ci} release=${release} mode=${mode}`)
+            expect(evaluateRunsOn(build['runs-on'], {
+              inputs: { ci, release },
+              vars,
+              matrix: { target, runner },
+              github: { event: { repository: { fork: false } } },
+            }), `${target} ci=${ci} release=${release} mode=${mode}`)
               .toBe(ci && !release && mode === 'blacksmith' ? blacksmith : runner)
+            expect(evaluateRunsOn(build['runs-on'], {
+              inputs: { ci, release },
+              vars,
+              matrix: { target, runner },
+              github: { event: { repository: { fork: true } } },
+            }), `${target} fork ci=${ci} release=${release} mode=${mode}`).toBe(runner)
           }
         }
       }
@@ -694,8 +705,17 @@ describe('Runtime and LLM e2e Blacksmith routing', () => {
     for (const ci of [false, true]) {
       for (const release of [false, true]) {
         for (const mode of ['', 'selfhosted', 'unexpected', 'blacksmith']) {
-          expect(evaluateRunsOn(job['runs-on'], { inputs: { ci, release }, vars: { DSH_CI_FAILOVER_LINUX: mode } }))
+          expect(evaluateRunsOn(job['runs-on'], {
+            inputs: { ci, release },
+            vars: { DSH_CI_FAILOVER_LINUX: mode },
+            github: { event: { repository: { fork: false } } },
+          }))
             .toBe(ci && !release && mode === 'blacksmith' ? 'blacksmith-4vcpu-ubuntu-2404' : 'ubuntu-latest')
+          expect(evaluateRunsOn(job['runs-on'], {
+            inputs: { ci, release },
+            vars: { DSH_CI_FAILOVER_LINUX: mode },
+            github: { event: { repository: { fork: true } } },
+          })).toBe('ubuntu-latest')
         }
       }
     }
@@ -976,6 +996,7 @@ describe('Build preview workflow', () => {
       expect(step?.if, `${name} must require a repository-owned non-Dependabot PR`).toContain(
         'github.event.pull_request.head.repo.full_name == github.repository',
       )
+      expect(step?.if).toContain('!github.event.repository.fork')
       expect(step?.if).toContain("github.event.pull_request.user.login != 'dependabot[bot]'")
     }
 
@@ -1118,9 +1139,6 @@ describe('Issue lifecycle workflow', () => {
     const handleStep = steps.find(s => s.name === 'Handle repository event')
     expect(preflightStep?.run).toContain('GITHUB_EVENT_PATH')
     expect(preflightStep?.run).toContain('event.repository?.fork === true')
-    expect(preflightStep?.run).toContain('event.pull_request?.user ?? event.issue?.user')
-    expect(preflightStep?.run).toContain("['Bot', 'App'].includes(subject?.type)")
-    expect(preflightStep?.run).toContain("['Bot', 'App'].includes(event.sender?.type)")
     const preflight = String(preflightStep?.run)
     const logicStart = preflight.indexOf('const fork =')
     const logicEnd = preflight.indexOf('fs.appendFileSync')
@@ -1130,10 +1148,12 @@ describe('Issue lifecycle workflow', () => {
       { event },
       { timeout: 1000 },
     )
-    expect(eligible({ repository: { fork: false }, issue: { user: { type: 'Bot' } }, sender: { type: 'User' } })).toBe(false)
-    expect(eligible({ repository: { fork: false }, issue: { user: { type: 'User' } }, sender: { type: 'App' } })).toBe(false)
-    expect(eligible({ repository: { fork: false }, issue: { user: { type: 'User' } }, sender: { type: 'User' } })).toBe(true)
-    expect(eligible({ repository: { fork: true }, issue: { user: { type: 'User' } }, sender: { type: 'User' } })).toBe(false)
+    for (const type of ['User', 'Bot', 'App']) {
+      expect(eligible({ repository: { fork: true }, issue: { user: { type } }, sender: { type } })).toBe(false)
+      expect(eligible({ repository: { fork: true }, pull_request: { user: { type } }, sender: { type } })).toBe(false)
+    }
+    expect(eligible({ repository: { fork: false }, pull_request: { user: { type: 'Bot' } }, sender: { type: 'Bot' } })).toBe(true)
+    expect(eligible({ repository: { fork: false }, issue: { user: { type: 'App' } }, sender: { type: 'App' } })).toBe(true)
     expect(tokenStep).toMatchObject({
       if: "${{ steps.preflight.outputs.eligible == 'true' }}",
       with: {

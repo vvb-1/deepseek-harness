@@ -46,14 +46,11 @@ jobs:
           import fs from 'node:fs'
           const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'))
           const fork = event.repository?.fork === true
-          const subject = event.pull_request?.user ?? event.issue?.user
-          const automated = ['Bot', 'App'].includes(subject?.type)
-            || ['Bot', 'App'].includes(event.sender?.type)
-          const eligible = !fork && !automated
+          const eligible = !fork
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `eligible=${eligible}\n`)
           console.log(eligible
             ? 'Lifecycle policy is eligible.'
-            : 'Fork or automated event is exempt; no App credentials are requested.')
+            : 'Fork repository lifecycle is exempt; no App credentials are requested.')
           NODE
       - name: Check out trusted policy
         if: ${{ steps.preflight.outputs.eligible == 'true' }}

@@ -91,6 +91,7 @@ jobs:
         # Fork and Dependabot PRs still prove the complete build above, but
         # GitHub withholds deployment credentials from both trust contexts.
         if: >-
+          !github.event.repository.fork &&
           github.event.pull_request.head.repo.full_name == github.repository &&
           github.event.pull_request.user.login != 'dependabot[bot]'
         env:
@@ -118,6 +119,7 @@ jobs:
       # about what the platform does with a body that is already compressed.
       - name: Verify the protected deployment serves the image
         if: >-
+          !github.event.repository.fork &&
           github.event.pull_request.head.repo.full_name == github.repository &&
           github.event.pull_request.user.login != 'dependabot[bot]'
         env:
@@ -160,6 +162,7 @@ jobs:
       # sees an `opened` event, and every later push must not restate the URL.
       - name: Comment the preview URL
         if: >-
+          !github.event.repository.fork &&
           github.event.pull_request.head.repo.full_name == github.repository &&
           github.event.pull_request.user.login != 'dependabot[bot]'
         env:
