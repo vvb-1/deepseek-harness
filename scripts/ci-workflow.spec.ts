@@ -14,6 +14,20 @@ const runnerPrivatePnpmDestination = /^\$\{\{ runner\.temp \}\}\/setup-pnpm-\$\{
 const nativeWindowsPnpmDestination = '${{ runner.temp }}/setup-pnpm-js-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}'
 
 describe('CI workflow', () => {
+  it('downloads the current Noble security bubblewrap payload and verifies it before extraction', () => {
+    const bootstrap = readFileSync(resolve(root, 'scripts/prepare-ci-bubblewrap.sh'), 'utf8')
+    const download = bootstrap.indexOf('curl --fail')
+    const verify = bootstrap.indexOf('sha256sum --check --status')
+    const extract = bootstrap.indexOf('dpkg-deb --extract')
+
+    expect(bootstrap).toContain("readonly BUBBLEWRAP_VERSION='0.9.0-1ubuntu0.3'")
+    expect(bootstrap).toContain("readonly BUBBLEWRAP_SHA256='2461f1beee9cb04c8942739fe1a2b37e7b7c2a3d518f0779dc75f9245baa3094'")
+    expect(bootstrap).toContain('https://launchpad.net/ubuntu/+archive/primary/+files/')
+    expect(download).toBeGreaterThanOrEqual(0)
+    expect(verify).toBeGreaterThan(download)
+    expect(extract).toBeGreaterThan(verify)
+  })
+
   it('prepares confinement before Node compatibility smokes', () => {
     const job = workflowJob(loadWorkflow('.github/workflows/ci.yml'), 'node-compat')
     if (!Array.isArray(job.steps)) throw new TypeError('Node compatibility job must define steps')
@@ -1104,7 +1118,22 @@ describe('Issue lifecycle workflow', () => {
     const handleStep = steps.find(s => s.name === 'Handle repository event')
     expect(preflightStep?.run).toContain('GITHUB_EVENT_PATH')
     expect(preflightStep?.run).toContain('event.repository?.fork === true')
-    expect(preflightStep?.run).toContain("['Bot', 'App'].includes(event.pull_request?.user?.type)")
+    expect(preflightStep?.run).toContain('event.pull_request?.user ?? event.issue?.user')
+    expect(preflightStep?.run).toContain("['Bot', 'App'].includes(subject?.type)")
+    expect(preflightStep?.run).toContain("['Bot', 'App'].includes(event.sender?.type)")
+    const preflight = String(preflightStep?.run)
+    const logicStart = preflight.indexOf('const fork =')
+    const logicEnd = preflight.indexOf('fs.appendFileSync')
+    const eligibilityLogic = preflight.slice(logicStart, logicEnd)
+    const eligible = (event: Record<string, unknown>): unknown => runInNewContext(
+      `(() => { ${eligibilityLogic}; return eligible })()`,
+      { event },
+      { timeout: 1000 },
+    )
+    expect(eligible({ repository: { fork: false }, issue: { user: { type: 'Bot' } }, sender: { type: 'User' } })).toBe(false)
+    expect(eligible({ repository: { fork: false }, issue: { user: { type: 'User' } }, sender: { type: 'App' } })).toBe(false)
+    expect(eligible({ repository: { fork: false }, issue: { user: { type: 'User' } }, sender: { type: 'User' } })).toBe(true)
+    expect(eligible({ repository: { fork: true }, issue: { user: { type: 'User' } }, sender: { type: 'User' } })).toBe(false)
     expect(tokenStep).toMatchObject({
       if: "${{ steps.preflight.outputs.eligible == 'true' }}",
       with: {
@@ -1113,6 +1142,9 @@ describe('Issue lifecycle workflow', () => {
       },
     })
     expect(handleStep?.if).toBe("${{ steps.preflight.outputs.eligible == 'true' }}")
+    for (const step of steps.slice(1)) {
+      expect(step.if, `${String(step.name)} must stay behind lifecycle preflight`).toBe("${{ steps.preflight.outputs.eligible == 'true' }}")
+    }
 
     // issue-policy owns PR validation; it is read-only and a real gate.
     const policyPullRequest = workflowEvent(policy, 'pull_request')
